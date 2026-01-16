@@ -1,0 +1,25 @@
+# Arquivos de ambiente
+.env
+
+# Configurações dos serviços (contém dados sensíveis)
+config/
+
+# Cache
+cache/
+
+# Downloads e mídia (muito grandes para git)
+downloads/
+media/
+cloud/
+
+# Logs
+*.log
+logs/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Backups
+*.bak
+*.backup

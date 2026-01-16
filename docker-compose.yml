@@ -1,0 +1,203 @@
+version: "3.9"
+
+services:
+  # ====================================
+  # JELLYFIN - Servidor de Mídia
+  # ====================================
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    hostname: jellyfin
+    restart: unless-stopped
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - JELLYFIN_PublishedServerUrl=${JELLYFIN_URL}
+    volumes:
+      - ./config/jellyfin:/config
+      - ./cache/jellyfin:/cache
+      - ./media:/media:ro
+      - ./downloads:/downloads:ro
+    ports:
+      - "8096:8096"       # HTTP
+      - "7359:7359/udp"   # Descoberta automática
+    networks:
+      - mediakit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ====================================
+  # JELLYSEERR - Gerenciador de Requisições
+  # ====================================
+  jellyseerr:
+    image: ghcr.io/fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    hostname: jellyseerr
+    restart: unless-stopped
+    init: true
+    environment:
+      - TZ=${TZ}
+      - LOG_LEVEL=info
+      - PORT=5055
+    volumes:
+      - ./config/jellyseerr:/app/config
+    ports:
+      - "5055:5055"
+    networks:
+      - mediakit-network
+    depends_on:
+      - jellyfin
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5055/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ====================================
+  # QBITTORRENT - Cliente de Torrent
+  # ====================================
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    hostname: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ./config/qbittorrent:/config
+      - ./downloads:/downloads
+      - ./media:/media
+    ports:
+      - "8080:8080"       # WebUI
+      - "6881:6881"       # Porta de torrents TCP
+      - "6881:6881/udp"   # Porta de torrents UDP
+    networks:
+      - mediakit-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ====================================
+  # RCLONE - Sincronização com Cloud (Google Drive, etc.)
+  # ====================================
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone
+    hostname: rclone
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - RCLONE_VERBOSE=1
+    volumes:
+      - ./config/rclone:/config/rclone
+      - ./media:/data/media
+      - ./downloads:/data/downloads
+      # Mount para Google Drive (será criado após configuração)
+      - ./cloud:/cloud:shared
+    # O rclone pode rodar como daemon para mount ou como sync periódico
+    # Por padrão, mantém o container rodando para permitir comandos manuais
+    command: rcd --rc-web-gui --rc-addr :5572 --rc-user ${RCLONE_USER} --rc-pass ${RCLONE_PASS} --config /config/rclone/rclone.conf
+    ports:
+      - "5572:5572"   # WebUI do rclone
+    networks:
+      - mediakit-network
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+
+  # ====================================
+  # PROWLARR - Indexador (Opcional - facilita busca de torrents)
+  # ====================================
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    hostname: prowlarr
+    restart: unless-stopped
+    profiles:
+      - full
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - mediakit-network
+    depends_on:
+      - qbittorrent
+
+  # ====================================
+  # RADARR - Gerenciador de Filmes (Opcional)
+  # ====================================
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    hostname: radarr
+    restart: unless-stopped
+    profiles:
+      - full
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/radarr:/config
+      - ./media/movies:/movies
+      - ./downloads:/downloads
+    ports:
+      - "7878:7878"
+    networks:
+      - mediakit-network
+    depends_on:
+      - qbittorrent
+      - prowlarr
+
+  # ====================================
+  # SONARR - Gerenciador de Séries (Opcional)
+  # ====================================
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    hostname: sonarr
+    restart: unless-stopped
+    profiles:
+      - full
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/sonarr:/config
+      - ./media/tv:/tv
+      - ./downloads:/downloads
+    ports:
+      - "8989:8989"
+    networks:
+      - mediakit-network
+    depends_on:
+      - qbittorrent
+      - prowlarr
+
+networks:
+  mediakit-network:
+    name: mediakit-network
+    driver: bridge
