@@ -17,12 +17,21 @@ services:
       - ./config/jellyfin:/config
       - ./cache/jellyfin:/cache
       - ./media:/media:ro
+      - type: bind
+        source: ./cloud
+        target: /cloud
+        read_only: true
+        bind:
+          propagation: rslave
       - ./downloads:/downloads:ro
     ports:
       - "8096:8096"       # HTTP
       - "7359:7359/udp"   # Descoberta automática
     networks:
       - mediakit-network
+      - proxy-network
+    depends_on:
+      - rclone-mount
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8096/health"]
       interval: 30s
@@ -49,6 +58,7 @@ services:
       - "5055:5055"
     networks:
       - mediakit-network
+      - proxy-network
     depends_on:
       - jellyfin
     healthcheck:
@@ -82,6 +92,7 @@ services:
       - "6881:6881/udp"   # Porta de torrents UDP
     networks:
       - mediakit-network
+      - proxy-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
@@ -106,13 +117,10 @@ services:
       - ./config/rclone:/config/rclone
       - ./media:/data/media
       - ./downloads:/data/downloads
-      # Mount para Google Drive (será criado após configuração)
       - ./cloud:/cloud:shared
-    # O rclone pode rodar como daemon para mount ou como sync periódico
-    # Por padrão, mantém o container rodando para permitir comandos manuais
     command: rcd --rc-web-gui --rc-addr :5572 --rc-user ${RCLONE_USER} --rc-pass ${RCLONE_PASS} --config /config/rclone/rclone.conf
     ports:
-      - "5572:5572"   # WebUI do rclone
+      - "5572:5572"
     networks:
       - mediakit-network
     cap_add:
@@ -121,6 +129,43 @@ services:
       - /dev/fuse
     security_opt:
       - apparmor:unconfined
+
+  # ====================================
+  # RCLONE-MOUNT - Monta Google Drive como pasta local
+  # ====================================
+  rclone-mount:
+    image: rclone/rclone:latest
+    container_name: rclone-mount
+    hostname: rclone-mount
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ./config/rclone:/config/rclone
+      - ./cloud:/mnt/cloud:shared
+    command: >
+      mount gdrive:MediaKit /mnt/cloud
+      --config /config/rclone/rclone.conf
+      --allow-other
+      --allow-non-empty
+      --vfs-cache-mode full
+      --vfs-cache-max-size 5G
+      --vfs-cache-max-age 24h
+      --vfs-read-chunk-size 64M
+      --vfs-read-chunk-size-limit 2G
+      --buffer-size 64M
+      --dir-cache-time 72h
+      --poll-interval 30s
+      --log-level INFO
+    networks:
+      - mediakit-network
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    privileged: true
 
   # ====================================
   # PROWLARR - Indexador (Opcional - facilita busca de torrents)
@@ -142,6 +187,7 @@ services:
       - "9696:9696"
     networks:
       - mediakit-network
+      - proxy-network
     depends_on:
       - qbittorrent
 
@@ -162,14 +208,17 @@ services:
     volumes:
       - ./config/radarr:/config
       - ./media/movies:/movies
+      - ./cloud/movies:/cloud-movies:ro
       - ./downloads:/downloads
     ports:
       - "7878:7878"
     networks:
       - mediakit-network
+      - proxy-network
     depends_on:
       - qbittorrent
       - prowlarr
+      - rclone-mount
 
   # ====================================
   # SONARR - Gerenciador de Séries (Opcional)
@@ -188,16 +237,21 @@ services:
     volumes:
       - ./config/sonarr:/config
       - ./media/tv:/tv
+      - ./cloud/tv:/cloud-tv:ro
       - ./downloads:/downloads
     ports:
       - "8989:8989"
     networks:
       - mediakit-network
+      - proxy-network
     depends_on:
       - qbittorrent
       - prowlarr
+      - rclone-mount
 
 networks:
   mediakit-network:
     name: mediakit-network
     driver: bridge
+  proxy-network:
+    external: true
