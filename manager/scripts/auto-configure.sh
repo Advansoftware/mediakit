@@ -109,7 +109,14 @@ configure_qbittorrent() {
             "incomplete_files_ext": true
         }' > /dev/null
     
-    log_success "qBittorrent configurado!"
+    # Criar categorias para Sonarr e Radarr
+    log_info "Criando categorias para Sonarr e Radarr..."
+    curl -s -b /tmp/qb_cookies.txt "$QB_URL/api/v2/torrents/createCategory" \
+        -d "category=tv-sonarr&savePath=/downloads/" > /dev/null 2>&1
+    curl -s -b /tmp/qb_cookies.txt "$QB_URL/api/v2/torrents/createCategory" \
+        -d "category=movies-radarr&savePath=/downloads/" > /dev/null 2>&1
+    
+    log_success "qBittorrent configurado com categorias!"
 }
 
 # ===========================================
