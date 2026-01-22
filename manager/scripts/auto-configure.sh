@@ -639,6 +639,114 @@ configure_jellyseerr() {
 }
 
 # ===========================================
+# CONFIGURAR SCRIPTS DE MOVE-TO-CLOUD
+# ===========================================
+configure_cloud_scripts() {
+    log_info "Configurando scripts de move-to-cloud..."
+    
+    # Criar script para Sonarr
+    mkdir -p "$CONFIG_DIR/sonarr/scripts"
+    cat > "$CONFIG_DIR/sonarr/scripts/move-to-cloud-on-import.sh" << 'SCRIPT'
+#!/bin/bash
+LOG_FILE="/config/logs/move-to-cloud.log"
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
+
+if [ -n "$sonarr_episodefile_path" ]; then
+    FILE_PATH="$sonarr_episodefile_path"
+    CLOUD_BASE="/cloud-tv"
+    LOCAL_BASE="/tv"
+    log "📺 Sonarr importou: $FILE_PATH"
+else
+    exit 0
+fi
+
+[ ! -f "$FILE_PATH" ] && exit 1
+
+RELATIVE_PATH="${FILE_PATH#$LOCAL_BASE/}"
+CLOUD_PATH="$CLOUD_BASE/$RELATIVE_PATH"
+CLOUD_DIR=$(dirname "$CLOUD_PATH")
+mkdir -p "$CLOUD_DIR" 2>/dev/null
+
+SIZE=$(du -h "$FILE_PATH" 2>/dev/null | cut -f1)
+log "📤 Movendo para cloud: $RELATIVE_PATH ($SIZE)"
+
+if cp "$FILE_PATH" "$CLOUD_PATH" 2>/dev/null; then
+    rm -f "$FILE_PATH"
+    ln -sf "$CLOUD_PATH" "$FILE_PATH"
+    log "✅ Movido e symlink criado"
+else
+    log "❌ Erro ao copiar"
+fi
+SCRIPT
+    chmod +x "$CONFIG_DIR/sonarr/scripts/move-to-cloud-on-import.sh"
+    
+    # Criar script para Radarr
+    mkdir -p "$CONFIG_DIR/radarr/scripts"
+    cat > "$CONFIG_DIR/radarr/scripts/move-to-cloud-on-import.sh" << 'SCRIPT'
+#!/bin/bash
+LOG_FILE="/config/logs/move-to-cloud.log"
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
+
+if [ -n "$radarr_moviefile_path" ]; then
+    FILE_PATH="$radarr_moviefile_path"
+    CLOUD_BASE="/cloud-movies"
+    LOCAL_BASE="/movies"
+    log "🎬 Radarr importou: $FILE_PATH"
+else
+    exit 0
+fi
+
+[ ! -f "$FILE_PATH" ] && exit 1
+
+RELATIVE_PATH="${FILE_PATH#$LOCAL_BASE/}"
+CLOUD_PATH="$CLOUD_BASE/$RELATIVE_PATH"
+CLOUD_DIR=$(dirname "$CLOUD_PATH")
+mkdir -p "$CLOUD_DIR" 2>/dev/null
+
+SIZE=$(du -h "$FILE_PATH" 2>/dev/null | cut -f1)
+log "📤 Movendo para cloud: $RELATIVE_PATH ($SIZE)"
+
+if cp "$FILE_PATH" "$CLOUD_PATH" 2>/dev/null; then
+    rm -f "$FILE_PATH"
+    ln -sf "$CLOUD_PATH" "$FILE_PATH"
+    log "✅ Movido e symlink criado"
+else
+    log "❌ Erro ao copiar"
+fi
+SCRIPT
+    chmod +x "$CONFIG_DIR/radarr/scripts/move-to-cloud-on-import.sh"
+    
+    # Adicionar notificação no Sonarr
+    local SONARR_API=$(cat "$CONFIG_DIR/.sonarr_api" 2>/dev/null)
+    if [ -n "$SONARR_API" ]; then
+        # Verificar se já existe
+        local EXISTS=$(curl -s "http://sonarr:8989/api/v3/notification" -H "X-Api-Key: $SONARR_API" | grep -c "Move to Cloud")
+        if [ "$EXISTS" -eq 0 ]; then
+            curl -s -X POST "http://sonarr:8989/api/v3/notification" \
+                -H "X-Api-Key: $SONARR_API" \
+                -H "Content-Type: application/json" \
+                -d '{"name":"Move to Cloud","implementation":"CustomScript","configContract":"CustomScriptSettings","onDownload":true,"onUpgrade":true,"fields":[{"name":"path","value":"/config/scripts/move-to-cloud-on-import.sh"}]}' > /dev/null 2>&1
+            log_success "Notificação Move to Cloud adicionada no Sonarr"
+        fi
+    fi
+    
+    # Adicionar notificação no Radarr
+    local RADARR_API=$(cat "$CONFIG_DIR/.radarr_api" 2>/dev/null)
+    if [ -n "$RADARR_API" ]; then
+        local EXISTS=$(curl -s "http://radarr:7878/api/v3/notification" -H "X-Api-Key: $RADARR_API" | grep -c "Move to Cloud")
+        if [ "$EXISTS" -eq 0 ]; then
+            curl -s -X POST "http://radarr:7878/api/v3/notification" \
+                -H "X-Api-Key: $RADARR_API" \
+                -H "Content-Type: application/json" \
+                -d '{"name":"Move to Cloud","implementation":"CustomScript","configContract":"CustomScriptSettings","onDownload":true,"onUpgrade":true,"fields":[{"name":"path","value":"/config/scripts/move-to-cloud-on-import.sh"}]}' > /dev/null 2>&1
+            log_success "Notificação Move to Cloud adicionada no Radarr"
+        fi
+    fi
+    
+    log_success "Scripts de move-to-cloud configurados!"
+}
+
+# ===========================================
 # MAIN
 # ===========================================
 main() {
@@ -655,6 +763,7 @@ main() {
     configure_sonarr
     configure_prowlarr_apps
     configure_brazilian_indexers
+    configure_cloud_scripts
     configure_jellyseerr
     
     log "=================================================="
