@@ -286,12 +286,16 @@ services:
       - PGID=${PGID}
       - MEDIAKIT_USER=${MEDIAKIT_USER:-admin}
       - MEDIAKIT_PASS=${MEDIAKIT_PASS:-adminadmin}
+      - QB_USER=${QB_USER:-admin}
+      - QB_PASS=${QB_PASS:-@Brunrego2022}
     volumes:
       - ./config:/app/config
       - ./downloads:/downloads
       - ./media:/media
       - ./cloud:/cloud:shared
       - ./logs:/app/logs
+    ports:
+      - "3000:3000"      # Dashboard Web
     networks:
       - mediakit-network
     depends_on:

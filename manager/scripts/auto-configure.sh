@@ -34,13 +34,14 @@ generate_api_key() {
 wait_for_service() {
     local name=$1
     local url=$2
-    local max_attempts=${3:-60}
+    local max_attempts=${3:-30}
     local attempt=0
     
     log_info "Aguardando $name ficar online..."
     
     while [ $attempt -lt $max_attempts ]; do
-        if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -qE "200|401|302"; then
+        local code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 3 "$url" 2>/dev/null)
+        if echo "$code" | grep -qE "200|401|302|307"; then
             log_success "$name está online!"
             return 0
         fi

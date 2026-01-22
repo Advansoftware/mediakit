@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediaKit Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .status-online {
+      background-color: #22c55e;
+    }
+
+    .status-offline {
+      background-color: #ef4444;
+    }
+
+    .log-container {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .log-line {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    .animate-pulse-slow {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+
+<body class="bg-gray-100 min-h-screen">
+  <!-- Header -->
+  <header class="bg-white shadow-sm border-b">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center py-4">
+        <div class="flex items-center space-x-3">
+          <h1 class="text-2xl font-bold text-gray-900">MediaKit Dashboard</h1>
+          <span id="connection-status" class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">●
+            Conectado</span>
+        </div>
+        <div class="flex items-center space-x-4">
+          <span class="text-sm text-gray-600">v1.0</span>
+          <a href="/logout" class="text-sm text-red-600 hover:text-red-800">Sair</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Status do Sistema -->
+      <div class="lg:col-span-1 space-y-6">
+        <!-- Disco -->
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">💾 Armazenamento</h2>
+          <div class="mb-2">
+            <div class="flex justify-between items-center mb-1">
+              <span class="text-sm text-gray-600">Uso do disco</span>
+              <span id="disk-percentage" class="text-sm font-bold text-gray-900">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-3">
+              <div id="disk-bar" class="bg-blue-600 h-3 rounded-full transition-all duration-500" style="width: 0%">
+              </div>
+            </div>
+          </div>
+          <div class="flex justify-between text-xs text-gray-500 mt-2">
+            <span id="disk-used">0GB usado</span>
+            <span id="disk-free">0GB livre</span>
+          </div>
+        </div>
+
+        <!-- Serviços -->
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">🔌 Serviços</h2>
+          <div id="services-list" class="space-y-3">
+            <div class="text-gray-500 text-sm">Carregando...</div>
+          </div>
+        </div>
+
+        <!-- Cloud Sync -->
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">☁️ Cloud Sync</h2>
+            <span id="cloud-status" class="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">Inativo</span>
+          </div>
+          <div id="cloud-stats" class="text-xs text-gray-500 mb-3"></div>
+          <div id="cloud-transfers" class="space-y-2 max-h-40 overflow-y-auto">
+            <p class="text-gray-400 text-sm text-center py-2">Nenhum upload ativo</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Downloads -->
+      <div class="lg:col-span-2">
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">⬇️ Downloads</h2>
+            <div class="flex flex-wrap gap-1">
+              <button onclick="filterDownloads('all')" id="dl-btn-all"
+                class="dl-btn px-3 py-1 text-xs bg-blue-600 text-white rounded-md">Todos</button>
+              <button onclick="filterDownloads('active')" id="dl-btn-active"
+                class="dl-btn px-3 py-1 text-xs bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Ativos</button>
+              <button onclick="filterDownloads('paused')" id="dl-btn-paused"
+                class="dl-btn px-3 py-1 text-xs bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Pausados</button>
+              <button onclick="filterDownloads('stalled')" id="dl-btn-stalled"
+                class="dl-btn px-3 py-1 text-xs bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Parados</button>
+              <button onclick="filterDownloads('completed')" id="dl-btn-completed"
+                class="dl-btn px-3 py-1 text-xs bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Completos</button>
+            </div>
+          </div>
+          <div id="downloads-count" class="text-xs text-gray-500 mb-3"></div>
+          <div id="downloads-list" class="max-h-96 overflow-y-auto">
+            <div class="text-center text-gray-500 py-8">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+              <p class="mt-2">Aguardando dados...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs em Tempo Real -->
+    <div class="mt-6">
+      <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="text-lg font-semibold text-gray-900">📋 Logs em Tempo Real</h2>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="switchLog('manager')" id="btn-manager"
+                class="log-btn px-3 py-1 text-sm bg-blue-600 text-white rounded-md">Manager</button>
+              <button onclick="switchLog('post-download')" id="btn-post-download"
+                class="log-btn px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Downloads</button>
+              <button onclick="switchLog('sync-cloud')" id="btn-sync-cloud"
+                class="log-btn px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Cloud</button>
+              <button onclick="switchLog('smart-space')" id="btn-smart-space"
+                class="log-btn px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Espaço</button>
+              <button onclick="switchLog('dashboard')" id="btn-dashboard"
+                class="log-btn px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Dashboard</button>
+            </div>
+          </div>
+        </div>
+        <div class="p-4">
+          <div id="logs-container" class="log-container bg-gray-900 text-green-400 p-4 rounded h-80 overflow-y-auto">
+            <div id="logs-content"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarefas Agendadas -->
+    <div class="mt-6">
+      <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">⏰ Tarefas Agendadas</h2>
+        <div id="cron-list" class="space-y-2 text-sm font-mono">
+          <div class="text-gray-500">Carregando...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let currentLogType = 'manager';
+    let currentDownloadFilter = 'all';
+    let allDownloads = [];
+    let isConnected = false;
+
+    // Conexão WebSocket
+    socket.on('connect', () => {
+      isConnected = true;
+      document.getElementById('connection-status').innerHTML = '● Conectado';
+      document.getElementById('connection-status').className = 'text-xs px-2 py-1 rounded-full bg-green-100 text-green-800';
+      socket.emit('subscribe-log', currentLogType);
+    });
+
+    socket.on('disconnect', () => {
+      isConnected = false;
+      document.getElementById('connection-status').innerHTML = '● Desconectado';
+      document.getElementById('connection-status').className = 'text-xs px-2 py-1 rounded-full bg-red-100 text-red-800 animate-pulse-slow';
+    });
+
+    // Receber atualizações de status em tempo real
+    socket.on('status-update', (status) => {
+      updateDisk(status.disk);
+      updateServices(status.services);
+      updateCloudSync(status.cloudSync);
+      allDownloads = status.downloads || [];
+      renderDownloads();
+      updateCrons(status.crons);
+    });
+
+    // Receber linhas de log em tempo real
+    socket.on('log-line', (data) => {
+      if (data.type === currentLogType) {
+        addLogLine(data.line);
+      }
+    });
+
+    // Categorizar estado do download
+    function getDownloadCategory(state) {
+      const activeStates = ['downloading', 'metaDL', 'allocating', 'checkingDL', 'forcedDL'];
+      const pausedStates = ['pausedDL', 'pausedUP'];
+      const stalledStates = ['stalledDL', 'stalledUP', 'queuedDL', 'queuedUP'];
+      const completedStates = ['uploading', 'seeding', 'forcedUP', 'completed'];
+
+      if (activeStates.includes(state)) return 'active';
+      if (pausedStates.includes(state)) return 'paused';
+      if (stalledStates.includes(state)) return 'stalled';
+      if (completedStates.includes(state) || state === 'uploading') return 'completed';
+      return 'other';
+    }
+
+    // Filtrar downloads por categoria
+    function filterDownloads(filter) {
+      currentDownloadFilter = filter;
+
+      // Atualizar botões
+      document.querySelectorAll('.dl-btn').forEach(btn => {
+        btn.className = 'dl-btn px-3 py-1 text-xs bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300';
+      });
+      document.getElementById('dl-btn-' + filter).className = 'dl-btn px-3 py-1 text-xs bg-blue-600 text-white rounded-md';
+
+      renderDownloads();
+    }
+
+    // Renderizar downloads filtrados
+    function renderDownloads() {
+      let filtered = allDownloads;
+
+      if (currentDownloadFilter !== 'all') {
+        filtered = allDownloads.filter(dl => getDownloadCategory(dl.state) === currentDownloadFilter);
+      }
+
+      // Contar por categoria
+      const counts = {
+        all: allDownloads.length,
+        active: allDownloads.filter(dl => getDownloadCategory(dl.state) === 'active').length,
+        paused: allDownloads.filter(dl => getDownloadCategory(dl.state) === 'paused').length,
+        stalled: allDownloads.filter(dl => getDownloadCategory(dl.state) === 'stalled').length,
+        completed: allDownloads.filter(dl => getDownloadCategory(dl.state) === 'completed').length
+      };
+
+      document.getElementById('downloads-count').textContent =
+        `Total: ${counts.all} | Ativos: ${counts.active} | Pausados: ${counts.paused} | Parados: ${counts.stalled} | Completos: ${counts.completed}`;
+
+      updateDownloads(filtered);
+    }
+
+    function updateDisk(disk) {
+      document.getElementById('disk-percentage').textContent = disk.percentage + '%';
+      const bar = document.getElementById('disk-bar');
+      bar.style.width = disk.percentage + '%';
+      bar.className = 'h-3 rounded-full transition-all duration-500 ' +
+        (disk.percentage > 90 ? 'bg-red-600' : disk.percentage > 70 ? 'bg-yellow-500' : 'bg-blue-600');
+      document.getElementById('disk-used').textContent = disk.used + 'GB usado';
+      document.getElementById('disk-free').textContent = disk.free + 'GB livre';
+    }
+
+    function updateCloudSync(cloudSync) {
+      const statusEl = document.getElementById('cloud-status');
+      const statsEl = document.getElementById('cloud-stats');
+      const transfersEl = document.getElementById('cloud-transfers');
+
+      if (!cloudSync) {
+        statusEl.textContent = 'Inativo';
+        statusEl.className = 'text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600';
+        transfersEl.innerHTML = '<p class="text-gray-400 text-sm text-center py-2">Nenhum upload ativo</p>';
+        return;
+      }
+
+      if (cloudSync.active && cloudSync.transfers && cloudSync.transfers.length > 0) {
+        statusEl.textContent = '⬆️ Enviando';
+        statusEl.className = 'text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 animate-pulse';
+
+        if (cloudSync.stats) {
+          statsEl.textContent = `Velocidade: ${cloudSync.stats.speed || 0} MB/s`;
+        }
+
+        transfersEl.innerHTML = '';
+        cloudSync.transfers.forEach(t => {
+          const div = document.createElement('div');
+          div.className = 'bg-gray-50 rounded p-2';
+          div.innerHTML = `
+            <div class="flex justify-between items-center mb-1">
+              <span class="text-xs text-gray-700 truncate flex-1 mr-2" title="${t.name}">${t.name}</span>
+              <span class="text-xs font-bold text-green-600">${t.progress}%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-1">
+              <div class="bg-green-500 h-1 rounded-full transition-all" style="width: ${t.progress}%"></div>
+            </div>
+            <div class="flex justify-between text-xs text-gray-500 mt-1">
+              <span>${t.size} GB</span>
+              <span>⚡ ${t.speed} MB/s</span>
+            </div>
+          `;
+          transfersEl.appendChild(div);
+        });
+      } else {
+        statusEl.textContent = 'Inativo';
+        statusEl.className = 'text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600';
+        statsEl.textContent = '';
+        transfersEl.innerHTML = '<p class="text-gray-400 text-sm text-center py-2">Nenhum upload ativo</p>';
+      }
+    }
+
+    function updateServices(services) {
+      const container = document.getElementById('services-list');
+      container.innerHTML = '';
+
+      const serviceNames = {
+        jellyfin: '🎬 Jellyfin',
+        jellyseerr: '📋 Jellyseerr',
+        qbittorrent: '⬇️ qBittorrent',
+        prowlarr: '🔍 Prowlarr',
+        radarr: '🎥 Radarr',
+        sonarr: '📺 Sonarr'
+      };
+
+      Object.entries(services).forEach(([service, state]) => {
+        const div = document.createElement('div');
+        div.className = 'flex items-center justify-between py-1';
+        div.innerHTML = `
+                    <span class="text-sm text-gray-700">${serviceNames[service] || service}</span>
+                    <span class="flex items-center text-xs ${state === 'online' ? 'text-green-600' : 'text-red-600'}">
+                        <span class="status-dot ${state === 'online' ? 'status-online' : 'status-offline'} mr-1"></span>
+                        ${state === 'online' ? 'Online' : 'Offline'}
+                    </span>
+                `;
+        container.appendChild(div);
+      });
+    }
+
+    function updateDownloads(downloads) {
+      const container = document.getElementById('downloads-list');
+
+      if (!downloads || downloads.length === 0) {
+        const msg = currentDownloadFilter === 'all' ? 'Nenhum download' : `Nenhum download ${currentDownloadFilter === 'active' ? 'ativo' : currentDownloadFilter === 'paused' ? 'pausado' : currentDownloadFilter === 'stalled' ? 'parado' : 'completo'}`;
+        container.innerHTML = `<p class="text-gray-500 text-center py-8">${msg}</p>`;
+        return;
+      }
+
+      container.innerHTML = '';
+      downloads.forEach(dl => {
+        const category = getDownloadCategory(dl.state);
+        const stateColors = {
+          active: 'text-blue-600',
+          paused: 'text-gray-600',
+          stalled: 'text-yellow-600',
+          completed: 'text-green-600'
+        };
+        const stateNames = {
+          downloading: '⬇️ Baixando',
+          metaDL: '📥 Obtendo metadados',
+          allocating: '💾 Alocando',
+          checkingDL: '🔍 Verificando',
+          forcedDL: '⬇️ Forçando download',
+          stalledDL: '⏳ Aguardando seeds',
+          stalledUP: '⏳ Aguardando peers',
+          queuedDL: '📋 Na fila',
+          queuedUP: '📋 Na fila upload',
+          pausedDL: '⏸️ Pausado',
+          pausedUP: '⏸️ Pausado',
+          uploading: '⬆️ Enviando',
+          seeding: '🌱 Seedando',
+          forcedUP: '⬆️ Forçando upload',
+          completed: '✅ Completo',
+          error: '❌ Erro'
+        };
+
+        const progressColor = dl.progress >= 100 ? 'bg-green-600' : category === 'active' ? 'bg-blue-600' : category === 'paused' ? 'bg-gray-400' : category === 'stalled' ? 'bg-yellow-500' : 'bg-green-600';
+
+        const div = document.createElement('div');
+        div.className = 'border rounded-lg p-3 mb-2 bg-gray-50 hover:bg-gray-100 transition-colors';
+        div.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="text-xs font-medium text-gray-900 truncate flex-1 mr-2" title="${dl.name}">${dl.name}</h3>
+                        <span class="text-sm font-bold ${stateColors[category] || 'text-gray-600'}">${dl.progress}%</span>
+                    </div>
+                    <div class="w-full bg-gray-200 rounded-full h-1.5 mb-2">
+                        <div class="${progressColor} h-1.5 rounded-full transition-all duration-300" style="width: ${dl.progress}%"></div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                        <span>💾 ${dl.downloaded}/${dl.size} GB</span>
+                        <span>⚡ ${dl.speed} MB/s</span>
+                        <span>👥 ${dl.seeds}/${dl.peers}</span>
+                        <span class="${stateColors[category] || 'text-gray-600'}">${stateNames[dl.state] || dl.state}</span>
+                    </div>
+                `;
+        container.appendChild(div);
+      });
+    }
+
+    function updateCrons(crons) {
+      const container = document.getElementById('cron-list');
+      if (!crons || crons.length === 0) {
+        container.innerHTML = '<div class="text-gray-500">Nenhuma tarefa agendada</div>';
+        return;
+      }
+      container.innerHTML = '';
+      crons.forEach(cron => {
+        const div = document.createElement('div');
+        div.className = 'bg-gray-100 p-2 rounded text-xs text-gray-700 overflow-x-auto';
+        div.textContent = cron;
+        container.appendChild(div);
+      });
+    }
+
+    function addLogLine(line) {
+      const container = document.getElementById('logs-content');
+      const div = document.createElement('div');
+      div.className = 'log-line mb-1';
+
+      // Colorir baseado no conteúdo
+      if (line.includes('✅') || line.includes('sucesso')) {
+        div.className += ' text-green-400';
+      } else if (line.includes('❌') || line.includes('erro') || line.includes('Erro')) {
+        div.className += ' text-red-400';
+      } else if (line.includes('⚠️') || line.includes('aviso')) {
+        div.className += ' text-yellow-400';
+      } else if (line.includes('ℹ️') || line.includes('Aguardando')) {
+        div.className += ' text-blue-400';
+      }
+
+      div.textContent = line;
+      container.appendChild(div);
+
+      // Auto-scroll
+      const logContainer = document.getElementById('logs-container');
+      logContainer.scrollTop = logContainer.scrollHeight;
+
+      // Limitar a 200 linhas
+      while (container.children.length > 200) {
+        container.removeChild(container.firstChild);
+      }
+    }
+
+    function switchLog(logType) {
+      currentLogType = logType;
+
+      // Limpar logs
+      document.getElementById('logs-content').innerHTML = '';
+
+      // Atualizar botões
+      document.querySelectorAll('.log-btn').forEach(btn => {
+        btn.className = 'log-btn px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300';
+      });
+      document.getElementById('btn-' + logType).className = 'log-btn px-3 py-1 text-sm bg-blue-600 text-white rounded-md';
+
+      // Subscribe no novo log
+      socket.emit('subscribe-log', logType);
+    }
+
+    // Inicialização
+    document.addEventListener('DOMContentLoaded', () => {
+      socket.emit('subscribe-log', 'manager');
+    });
+  </script>
+</body>
+
+</html>

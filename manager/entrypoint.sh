@@ -3,9 +3,6 @@
 # MediaKit Manager - Entrypoint
 # ===========================================
 
-# Não usar set -e para evitar saída prematura
-# set -e
-
 LOG_DIR="/app/logs"
 CONFIG_DIR="/app/config"
 
@@ -21,14 +18,40 @@ log() {
 
 log "🚀 MediaKit Manager iniciando..."
 
-# Copiar definição do indexer brasileiro para Prowlarr
+# ===========================================
+# 1. INICIAR DASHBOARD PRIMEIRO (para ver tudo acontecendo)
+# ===========================================
+log "🌐 Iniciando Dashboard Web PRIMEIRO..."
+cd /app/dashboard && node server.js >> "$LOG_DIR/dashboard.log" 2>&1 &
+DASHBOARD_PID=$!
+
+# Aguardar dashboard iniciar
+sleep 3
+
+if kill -0 $DASHBOARD_PID 2>/dev/null; then
+    log "✅ Dashboard iniciado com PID: $DASHBOARD_PID"
+    log "🌐 Acesse: http://localhost:3000"
+    log "   Usuário: ${MEDIAKIT_USER:-admin}"
+    log "   Senha: ${MEDIAKIT_PASS:-adminadmin}"
+else
+    log "⚠️ Dashboard falhou ao iniciar"
+    cat "$LOG_DIR/dashboard.log" 2>/dev/null | tail -20 || true
+fi
+
+log ""
+
+# ===========================================
+# 2. COPIAR DEFINIÇÕES DE INDEXER
+# ===========================================
 if [ -d "/app/config/prowlarr" ]; then
     mkdir -p "/app/config/prowlarr/Definitions/Custom"
     cp /app/indexer-definitions/*.yml "/app/config/prowlarr/Definitions/Custom/" 2>/dev/null || true
     log "📋 Definições de indexer copiadas para Prowlarr"
 fi
 
-# Aguardar containers estarem prontos
+# ===========================================
+# 3. AGUARDAR SERVIÇOS FICAREM ONLINE
+# ===========================================
 log "⏳ Aguardando serviços ficarem online..."
 
 wait_for_services() {
@@ -36,7 +59,6 @@ wait_for_services() {
     local waited=0
     
     while [ $waited -lt $max_wait ]; do
-        # Verificar serviços essenciais
         local prowlarr_ok=$(curl -s -o /dev/null -w "%{http_code}" "http://prowlarr:9696" 2>/dev/null || echo "000")
         local radarr_ok=$(curl -s -o /dev/null -w "%{http_code}" "http://radarr:7878" 2>/dev/null || echo "000")
         local sonarr_ok=$(curl -s -o /dev/null -w "%{http_code}" "http://sonarr:8989" 2>/dev/null || echo "000")
@@ -61,14 +83,13 @@ wait_for_services() {
 
 wait_for_services
 
-# Verificar se já está configurado
+# ===========================================
+# 4. AUTO-CONFIGURAÇÃO
+# ===========================================
 if [ ! -f "$CONFIG_DIR/.configured" ]; then
     log "🔧 Primeira execução detectada - Iniciando auto-configuração..."
-    
-    # Aguardar mais um pouco para garantir que os serviços inicializaram completamente
     sleep 15
     
-    # Executar configuração automática
     if /app/scripts/auto-configure.sh; then
         touch "$CONFIG_DIR/.configured"
         log "✅ Auto-configuração concluída com sucesso!"
@@ -78,31 +99,34 @@ if [ ! -f "$CONFIG_DIR/.configured" ]; then
 else
     log "✅ Sistema já configurado anteriormente"
     
-    # Re-sincronizar indexers brasileiros (pode ter novos)
     if [ -f "/app/scripts/auto-configure.sh" ]; then
         log "🔄 Verificando indexers brasileiros..."
-        # Extrair apenas a função de indexers do script
         source /app/scripts/auto-configure.sh 2>/dev/null || true
         configure_brazilian_indexers 2>/dev/null || true
     fi
 fi
 
-# Configurar crontab
+# ===========================================
+# 5. CONFIGURAR CRONTAB
+# ===========================================
 log "⏰ Configurando tarefas agendadas..."
 cat > /var/spool/cron/crontabs/root << 'CRONTAB'
 # MediaKit Cron Jobs
 # ==================
 
-# Verificar downloads completos e mover para cloud a cada 2 minutos
+# 🧠 Smart Space Manager - A CADA 1 MINUTO
+*/1 * * * * /app/scripts/smart-space-manager.sh >> /app/logs/smart-space.log 2>&1
+
+# Verificar downloads completos a cada 2 minutos
 */2 * * * * /app/scripts/post-download.sh >> /app/logs/post-download.log 2>&1
 
 # Sincronizar com cloud a cada 10 minutos
 */10 * * * * /app/scripts/sync-cloud.sh >> /app/logs/sync-cloud.log 2>&1
 
-# Monitorar saúde dos serviços a cada 5 minutos
+# Monitorar saúde a cada 5 minutos
 */5 * * * * /app/scripts/health-check.sh >> /app/logs/health-check.log 2>&1
 
-# Limpeza de logs semanalmente (domingo 00:00)
+# Limpeza de logs semanalmente
 0 0 * * 0 find /app/logs -name "*.log" -mtime +7 -delete
 
 # Rotação de logs diária
@@ -110,18 +134,22 @@ cat > /var/spool/cron/crontabs/root << 'CRONTAB'
 CRONTAB
 
 chmod 0600 /var/spool/cron/crontabs/root
-
 log "✅ Crontab configurado"
+
+# ===========================================
+# 6. MANTER CONTAINER RODANDO
+# ===========================================
 log "🎯 MediaKit Manager pronto!"
 log ""
 log "📋 Logs disponíveis em /app/logs/"
-log "   - manager.log: Log principal do manager"
-log "   - post-download.log: Movimentação de downloads"
-log "   - sync-cloud.log: Sincronização com cloud"
-log "   - health-check.log: Verificação de saúde"
+log "   - manager.log: Log principal"
+log "   - dashboard.log: Servidor web"
+log "   - post-download.log: Downloads"
+log "   - sync-cloud.log: Cloud sync"
+log "   - smart-space.log: Espaço"
 log ""
 
-# Manter container rodando com cron
+# Iniciar cron em foreground
 log "🔄 Iniciando daemon cron..."
 exec /usr/sbin/crond -f -d 8
 

@@ -10,20 +10,31 @@ RUN apk add --no-cache \
   ca-certificates \
   tzdata \
   rclone \
-  fuse3
+  fuse3 \
+  nodejs \
+  npm
 
 # Criar diretórios
-RUN mkdir -p /app/scripts /app/logs /app/indexer-definitions /var/spool/cron/crontabs
+RUN mkdir -p /app/scripts /app/logs /app/indexer-definitions /app/dashboard /var/spool/cron/crontabs
 
 # Copiar arquivos
 COPY scripts/ /app/scripts/
 COPY indexer-definitions/ /app/indexer-definitions/
 COPY entrypoint.sh /app/entrypoint.sh
+COPY dashboard/ /app/dashboard/
+
+# Instalar dependências do dashboard
+WORKDIR /app/dashboard
+RUN npm install
+
+# Voltar para /app
+WORKDIR /app
 
 # Permissões
 RUN chmod +x /app/scripts/*.sh /app/entrypoint.sh
 
-WORKDIR /app
+# Expor porta do dashboard
+EXPOSE 3000
 
 # Volumes
 VOLUME ["/app/logs", "/app/config", "/downloads", "/media"]
