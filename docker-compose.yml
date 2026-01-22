@@ -249,6 +249,24 @@ services:
       - prowlarr
       - rclone-mount
 
+  # ====================================
+  # TORRENT-INDEXER - Indexador de Torrents Brasileiros
+  # ====================================
+  torrent-indexer:
+    image: ghcr.io/felipemarinho97/torrent-indexer:latest
+    container_name: torrent-indexer
+    hostname: torrent-indexer
+    restart: unless-stopped
+    environment:
+      - PORT=7006
+      - LOG_LEVEL=1
+      - SHORT_LIVED_CACHE_EXPIRATION=30m
+      - LONG_LIVED_CACHE_EXPIRATION=7d
+    ports:
+      - "7006:7006"
+    networks:
+      - mediakit-network
+
 networks:
   mediakit-network:
     name: mediakit-network
